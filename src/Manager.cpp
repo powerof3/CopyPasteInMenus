@@ -55,10 +55,19 @@ namespace detail
 
 	bool WriteToTextField(RE::GFxMovieView* view, const std::string& path, std::string_view text)
 	{
-		std::string textPath = path + ".text";
+		std::string basePath = path;
 
-		RE::GFxValue value(text);
-		return view->SetVariable(textPath.c_str(), value);
+		if (basePath.contains(".TextInputInstance.textField") || basePath.contains(".textInput.textField")) {
+			if (auto pos = basePath.find(".textField"); pos != std::string::npos) {
+				basePath.erase(pos, sizeof(".textField") - 1);
+			}
+		}
+
+		RE::GFxValue maxChars(text.size());
+		view->SetVariable((basePath + ".maxChars").c_str(), maxChars);
+
+		RE::GFxValue textValue(text);
+		return view->SetVariable((basePath + ".text").c_str(), textValue);
 	}
 
 	bool GetCaretIndex(RE::GFxMovieView* view, const std::string& path, double& caretIndexOut)
@@ -134,7 +143,7 @@ RE::BSEventNotifyControl Manager::ProcessEvent(RE::InputEvent* const* a_evn, RE:
 	if (keyCombo1 && keyCombo2) {
 		if (clipboardText = detail::GetClipboardText(); !clipboardText.empty()) {
 			std::jthread thread([this] {
-				std::this_thread::sleep_for(std::chrono::milliseconds(inputDelay)); // for V to be added to the text field so we can remove it
+				std::this_thread::sleep_for(std::chrono::milliseconds(inputDelay));  // for V to be added to the text field so we can remove it
 				SKSE::GetTaskInterface()->AddUITask([this] {
 					auto* view = detail::GetActiveTextInputView();
 					if (!view) {
@@ -150,6 +159,10 @@ RE::BSEventNotifyControl Manager::ProcessEvent(RE::InputEvent* const* a_evn, RE:
 						keyCombo2 = false;
 
 						return;
+					}
+
+					if (path.starts_with("_level0.")) {
+						path.replace(0, 7, "_root");
 					}
 
 					std::string oldText;
