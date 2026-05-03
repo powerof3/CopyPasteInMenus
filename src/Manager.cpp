@@ -91,7 +91,7 @@ namespace detail
 		std::string path;
 		for (const auto& menuPtr : ui->menuStack) {
 			if (auto menu = menuPtr.get(); menu && menu->uiMovie) {
-				if (detail::GetFocusedField(menu->uiMovie.get(), path) && path.contains("textField")) {
+				if (detail::GetFocusedField(menu->uiMovie.get(), path) && (string::icontains(path, "textField") || string::icontains(path, "TextInput"))) {
 					return menu->uiMovie.get();
 				}
 			}
@@ -165,6 +165,8 @@ RE::BSEventNotifyControl Manager::ProcessEvent(RE::InputEvent* const* a_evn, RE:
 						path.replace(0, 7, "_root");
 					}
 
+					constexpr auto isPastedKey = [](char c) { return c == 'v' || c == 'V'; };
+
 					std::string oldText;
 					detail::ReadFromTextField(view, path, oldText);
 
@@ -178,34 +180,39 @@ RE::BSEventNotifyControl Manager::ProcessEvent(RE::InputEvent* const* a_evn, RE:
 						const RE::GFxValue args[2]{ newText.length(), newText.length() };
 						view->Invoke("Selection.setSelection", nullptr, args, 2);
 					} else {
-						if (oldText.size() == 1) {
+						if (oldText.size() == 1 && isPastedKey(oldText.front())) {
 							oldText.erase(0, 1);
 						}
 
 						std::string newText = oldText;
 						bool        appended{ false };
+						bool        erased{ false };
 
 						if (double cursorPos = 0; detail::GetCaretIndex(view, path, cursorPos)) {
 							// insert at cursor pos
 							if (oldText.size() > cursorPos) {
 								appended = false;
 								newText.insert((std::uint64_t)cursorPos, clipboardText);
-								newText.erase((std::uint64_t)cursorPos - 1, 1);
+								if (cursorPos >= 1 && isPastedKey(newText[(std::uint64_t)cursorPos - 1])) {
+									newText.erase((std::uint64_t)cursorPos - 1, 1);
+									erased = true;
+								}
 							} else {  // or append if cursor is at end
 								appended = true;
 								newText += clipboardText;
-								if (!oldText.empty()) {
+								if (!oldText.empty() && isPastedKey(oldText.back())) {
 									newText.erase(oldText.length() - 1, 1);
+									erased = true;
 								}
 							}
 
 							detail::WriteToTextField(view, path, newText);
 
 							// move cursor
-							const auto index =
-								appended ?
-									newText.length() :
-									cursorPos + (clipboardText.length() - 1);
+							const auto index = appended ?
+							                       newText.length() :
+							                       cursorPos + clipboardText.length() - (erased ? 1 : 0);
+
 							const RE::GFxValue args[2]{ index, index };
 							view->Invoke("Selection.setSelection", nullptr, args, 2);
 						}
