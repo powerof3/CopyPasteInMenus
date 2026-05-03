@@ -8,19 +8,19 @@ namespace detail
 		std::string text;
 
 		// Try opening the clipboard
-		if (!IsClipboardFormatAvailable(CF_TEXT) || !OpenClipboard(nullptr)) {
+		if (!IsClipboardFormatAvailable(CF_UNICODETEXT) || !OpenClipboard(nullptr)) {
 			return text;
 		}
 
 		// Get handle of clipboard object for ANSI text
-		const HANDLE hData = GetClipboardData(CF_TEXT);
+		const HANDLE hData = GetClipboardData(CF_UNICODETEXT);
 		if (hData == nullptr) {
 			return text;
 		}
 
 		// Lock the handle to get the actual text pointer
-		if (const auto pszText = static_cast<const char*>(GlobalLock(hData)); pszText != nullptr) {
-			text = pszText;
+		if (const auto pszText = static_cast<const wchar_t*>(GlobalLock(hData)); pszText != nullptr) {
+			text = stl::utf16_to_utf8(pszText).value_or("");
 		}
 
 		// Release the lock
