@@ -63,8 +63,13 @@ namespace detail
 			}
 		}
 
-		RE::GFxValue maxChars(text.size());
-		view->SetVariable((basePath + ".maxChars").c_str(), maxChars);
+		std::string maxCharsPath = basePath + ".maxChars";
+		constexpr std::size_t CHAR_LIMIT = 260;
+
+		RE::GFxValue maxChars;
+		if (view->GetVariable(&maxChars, maxCharsPath.c_str()) && maxChars.GetUInt() < CHAR_LIMIT) {
+			view->SetVariable(maxCharsPath.c_str(), CHAR_LIMIT);
+		}
 
 		RE::GFxValue textValue(text);
 		return view->SetVariable((basePath + ".text").c_str(), textValue);

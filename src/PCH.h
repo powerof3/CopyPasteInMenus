@@ -1,5 +1,7 @@
 #pragma once
 
+#define NOMINMAX 
+
 #include "RE/Skyrim.h"
 #include "REX/REX/Singleton.h"
 #include "SKSE/SKSE.h"
