@@ -21,6 +21,7 @@ namespace detail
 		// Get handle of clipboard object for ANSI text
 		const HANDLE hData = GetClipboardData(CF_UNICODETEXT);
 		if (hData == nullptr) {
+			CloseClipboard();
 			return text;
 		}
 
@@ -89,6 +90,38 @@ namespace detail
 			return false;
 		}
 		caretIndexOut = value.GetNumber();
+		return true;
+	}
+
+	bool CreateStringObject(RE::GFxMovieView* view, std::string_view text, RE::GFxValue& objectOut)
+	{
+		const RE::GFxValue args(text);
+		view->CreateObject(&objectOut, "String", &args, 1);
+		if (!objectOut.IsObject()) {
+			return false;
+		}
+		return true;
+	}
+
+	bool GetStringObjectLength(const RE::GFxValue& object, double& lengthOut)
+	{
+		RE::GFxValue value;
+		object.GetMember("length", &value);
+		if (!value.IsNumber()) {
+			return false;
+		}
+		lengthOut = value.GetNumber();
+		return true;
+	}
+
+	bool GetStringObjectSubStr(RE::GFxValue& object, double start, double length, std::string& textOut)
+	{
+		const RE::GFxValue args[2]{ start, length };
+		RE::GFxValue result;
+		if (!object.Invoke("substr", &result, args, 2) || !result.IsString()) {
+			return false;
+		}
+		textOut = result.GetString();
 		return true;
 	}
 
@@ -170,66 +203,79 @@ RE::BSEventNotifyControl Manager::ProcessEvent(RE::InputEvent* const* a_evn, RE:
 						path.replace(0, 7, "_root");
 					}
 
-					constexpr auto isPastedKey = [](char c) { return c == 'v' || c == 'V'; };
-
-					std::string oldText;
-					detail::ReadFromTextField(view, path, oldText);
-
-					if (GetPasteType() == PasteType::kEndOfText) {
-						auto newText = oldText + clipboardText;
-						if (!oldText.empty()) {
-							newText.erase(oldText.length() - 1, 1);
-						}
-						detail::WriteToTextField(view, path, newText);
-
-						const RE::GFxValue args[2]{ newText.length(), newText.length() };
-						view->Invoke("Selection.setSelection", nullptr, args, 2);
-					} else {
-						if (oldText.size() == 1 && isPastedKey(oldText.front())) {
-							oldText.erase(0, 1);
-						}
-
-						std::string newText = oldText;
-						bool        appended{ false };
-						bool        erased{ false };
-
-						if (double cursorPos = 0; detail::GetCaretIndex(view, path, cursorPos)) {
-							// insert at cursor pos
-							if (oldText.size() > cursorPos) {
-								appended = false;
-								newText.insert((std::uint64_t)cursorPos, clipboardText);
-								if (cursorPos >= 1 && isPastedKey(newText[(std::uint64_t)cursorPos - 1])) {
-									newText.erase((std::uint64_t)cursorPos - 1, 1);
-									erased = true;
-								}
-							} else {  // or append if cursor is at end
-								appended = true;
-								newText += clipboardText;
-								if (!oldText.empty() && isPastedKey(oldText.back())) {
-									newText.erase(oldText.length() - 1, 1);
-									erased = true;
-								}
-							}
-
-							detail::WriteToTextField(view, path, newText);
-
-							// move cursor
-							const auto index = appended ?
-							                       newText.length() :
-							                       cursorPos + clipboardText.length() - (erased ? 1 : 0);
-
-							const RE::GFxValue args[2]{ index, index };
-							view->Invoke("Selection.setSelection", nullptr, args, 2);
-						}
-					}
+					PasteText(view, path);
 
 					keyCombo1 = false;
 					keyCombo2 = false;
 				});
 			});
 			thread.detach();
+		} else {
+			keyCombo1 = false;
+			keyCombo2 = false;
 		}
 	}
 
 	return RE::BSEventNotifyControl::kContinue;
+}
+
+bool Manager::PasteText(RE::GFxMovieView* view, const std::string& path)
+{
+	constexpr auto isPastedKey = [](std::string_view str) { return str == "v" || str == "V"; };
+
+	std::string oldText;
+	double oldIndex = 0.0;
+	if (!detail::ReadFromTextField(view, path, oldText)) {
+		return false;
+	}
+	if (!detail::GetCaretIndex(view, path, oldIndex)) {
+		return false;
+	}
+
+	RE::GFxValue oldString;
+	RE::GFxValue clipboardString;
+	double oldLength = 0.0;
+	double clipboardLength = 0.0;
+	if (!detail::CreateStringObject(view, oldText, oldString) || !detail::CreateStringObject(view, clipboardText, clipboardString)) {
+		return false;
+	}
+	if (!detail::GetStringObjectLength(oldString, oldLength) || !detail::GetStringObjectLength(clipboardString, clipboardLength)) {
+		return false;
+	}
+
+	double prefixLength = oldIndex;
+	double suffixLength = oldLength - oldIndex;
+	if (oldIndex > 0.0) {
+		std::string prevChar;
+		if (!detail::GetStringObjectSubStr(oldString, oldIndex - 1.0, 1.0, prevChar)) {
+			return false;
+		}
+
+		if (isPastedKey(prevChar)) {
+			prefixLength = oldIndex - 1.0;
+		}
+	}
+
+	std::string newText = oldText;
+	double newIndex = oldIndex;
+	std::string prefix;
+	std::string suffix;
+	if (!detail::GetStringObjectSubStr(oldString, 0.0, prefixLength, prefix) || !detail::GetStringObjectSubStr(oldString, oldIndex, suffixLength, suffix)) {
+		return false;
+	}
+	if (GetPasteType() == PasteType::kEndOfText) {
+		newText = prefix + suffix + clipboardText;
+		newIndex = prefixLength + suffixLength + clipboardLength;
+	} else {
+		newText = prefix + clipboardText + suffix;
+		newIndex = prefixLength + clipboardLength;
+	}
+	if (!detail::WriteToTextField(view, path, newText)) {
+		return false;
+	}
+
+	// move cursor
+	const RE::GFxValue args[2]{ newIndex, newIndex };
+	view->Invoke("Selection.setSelection", nullptr, args, 2);
+	return true;
 }
